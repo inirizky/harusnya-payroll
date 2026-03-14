@@ -30,7 +30,7 @@ payrollRoute.post('/generate', zValidator('json', PayrollGenerateSchema), async 
 });
 
 // GET /api/payroll/download/:slipId
-payrollRoute.get('/download/:slipId', async (c) => {
+payrollRoute.get('/view/:slipId', async (c) => {
     const slipId = parseInt(c.req.param('slipId'));
     const payrollData = await PayrollService.getById(slipId);
 

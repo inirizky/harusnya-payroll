@@ -27,10 +27,23 @@ export class EmployeeService {
 
     static async getAll() {
         return await prisma.karyawan.findMany({
-            include: {
-                golongan: true,
-                jabatan: true,
-            },
+            select: {
+                id: true,
+                nik: true,
+                nama: true,
+                jabatan: {
+                    select: {
+                        nama: true,
+                    },
+                },
+                gajiPokok: true,
+                golongan: {
+                    select: {
+                        nama: true,
+                    },
+                }
+            }
+
         });
     }
 
@@ -38,6 +51,7 @@ export class EmployeeService {
         return await prisma.karyawan.findUnique({
             where: { id },
             include: {
+                slipGaji: true,
                 komponenTetap: true,
                 golongan: true,
                 jabatan: true,

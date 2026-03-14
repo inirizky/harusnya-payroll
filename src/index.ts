@@ -14,7 +14,11 @@ const app = new Hono();
 
 // Middlewares
 app.use('*', honoLogger());
-app.use('*', cors());
+app.use("*", cors({
+
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    credentials: true,
+}));
 
 // Routes
 app.get('/', (c) => c.text('Employee Payroll API is running!'));
