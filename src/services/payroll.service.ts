@@ -118,9 +118,24 @@ export class PayrollService {
 
     static async getAll() {
         return await prisma.slipGaji.findMany({
-            include: {
-                karyawan: true,
+            select: {
+                id: true,
+                bulan: true,
+                tahun: true,
+                gajiBersih: true,
+                gajiKotor: true,
+                gajiPokok: true,
+                totalPotongan: true,
+                createdAt: true,
+                karyawan: {
+                    select: {
+                        id: true,
+                        nama: true,
+
+                    },
+                },
             },
+
             orderBy: {
                 createdAt: 'desc',
             },
