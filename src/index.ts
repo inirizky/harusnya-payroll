@@ -1,24 +1,26 @@
-import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { logger as honoLogger } from 'hono/logger';
+import { logger } from 'hono/logger';
 import { errorHandler } from './middlewares/error-handler.js';
 import employeeRoute from './routes/employee.route.js';
 import payrollRoute from './routes/payroll.route.js';
 import masterRoute from './routes/master.route.js';
 import attendanceRoute from './routes/attendance.route.js';
-import { logger } from './lib/logger.js';
 import 'dotenv/config';
+import { prettyJSON } from 'hono/pretty-json';
 
 const app = new Hono();
 
-// Middlewares
-app.use('*', honoLogger());
-app.use("*", cors({
 
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    maxAge: 600,
     credentials: true,
-}));
+}))
+
+app.use("*", logger())
+app.use("*", prettyJSON())
+
 
 // Routes
 app.get('/', (c) => c.text('Employee Payroll API is running!'));
@@ -30,11 +32,4 @@ app.route('/api/payroll', payrollRoute);
 // Error Handling
 app.onError(errorHandler);
 
-const port = Number(process.env.PORT) || 3000;
-
-logger.info(`Server is running on port ${port}`);
-
-serve({
-    fetch: app.fetch,
-    port,
-});
+export default app;

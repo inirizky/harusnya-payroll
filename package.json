@@ -4,7 +4,7 @@
   "description": "Employee Payroll API with Hono",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "db:generate": "prisma generate",
