@@ -6,7 +6,6 @@ import employeeRoute from './routes/employee.route.js';
 import payrollRoute from './routes/payroll.route.js';
 import masterRoute from './routes/master.route.js';
 import attendanceRoute from './routes/attendance.route.js';
-import 'dotenv/config';
 import { prettyJSON } from 'hono/pretty-json';
 
 const app = new Hono();
