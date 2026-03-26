@@ -4,6 +4,7 @@
     "module": "NodeNext",
     "strict": true,
     "skipLibCheck": true,
+    "moduleResolution": "NodeNext",
     "types": ["node"],
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx",

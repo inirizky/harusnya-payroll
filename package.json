@@ -8,6 +8,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "tsx src/index.ts",
+    "vercel-build": "prisma generate && tsc",
     "db:generate": "prisma generate",
     "db:seed": "prisma db seed",
     "db:migrate": "prisma migrate dev"
