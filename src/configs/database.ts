@@ -1,29 +1,12 @@
-import { PrismaClient } from '@prisma/client';
-import { logger } from '../lib/logger.js';
+import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient({
-    log: [
-        { emit: 'event', level: 'query' },
-        { emit: 'event', level: 'info' },
-        { emit: 'event', level: 'warn' },
-        { emit: 'event', level: 'error' },
-    ],
-});
 
-prisma.$on('query' as any, (e: any) => {
-    logger.info(`Query: ${e.query} | Params: ${e.params} | Duration: ${e.duration}ms`);
-});
+const globalForPrisma = globalThis as unknown as {
+    prisma: PrismaClient | undefined;
+};
 
-prisma.$on('info' as any, (e: any) => {
-    logger.info(e.message);
-});
+export const prisma = globalForPrisma.prisma ?? new PrismaClient();
 
-prisma.$on('warn' as any, (e: any) => {
-    logger.warn(e.message);
-});
-
-prisma.$on('error' as any, (e: any) => {
-    logger.error(e.message);
-});
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
 export default prisma;
