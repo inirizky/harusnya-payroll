@@ -33,15 +33,28 @@ export class EmployeeService {
                 nama: true,
                 jabatan: {
                     select: {
+                        id: true,
                         nama: true,
                     },
                 },
                 gajiPokok: true,
                 golongan: {
                     select: {
+                        id: true,
                         nama: true,
                     },
-                }
+                },
+                tarifMakan: true,
+                tarifTransport: true,
+                komponenTetap: {
+                    select: {
+                        id: true,
+                        nama: true,
+                        jenis: true,
+                        jumlah: true,
+                    },
+                },
+
             }
 
         });

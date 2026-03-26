@@ -31,6 +31,19 @@ export const PayrollGenerateSchema = z.object({
     potonganLain: z.array(KomponenLainSchema).optional(),
 });
 
+export const PayrollUpdateSchema = z.object({
+    status: z.enum([
+        'DRAFT', 'REVIEW', 'PENDING', 'APPROVED', 'SENT', 
+        'CONFIRMED', 'DISPUTED', 'UNDER_REVIEW', 'PROCESSED', 
+        'PAID', 'REJECTED', 'CANCELLED'
+    ]).optional(),
+    catatanBanding: z.string().optional().nullable(),
+    tunjanganTetap: z.array(KomponenLainSchema).optional(),
+    potonganTetap: z.array(KomponenLainSchema).optional(),
+    tunjanganLain: z.array(KomponenLainSchema).optional(),
+    potonganLain: z.array(KomponenLainSchema).optional(),
+});
+
 export const GolonganSchema = z.object({
     nama: z.string(),
     tunjanganGolongan: z.number().min(0),
@@ -38,6 +51,12 @@ export const GolonganSchema = z.object({
 
 export const JabatanSchema = z.object({
     nama: z.string(),
+});
+
+export const KomponenDefaultSchema = z.object({
+    nama: z.string(),
+    jenis: z.enum(['TUNJANGAN', 'POTONGAN']),
+    jumlah: z.number().min(0),
 });
 
 export const KehadiranSchema = z.object({

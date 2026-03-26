@@ -1,187 +1,421 @@
 import PDFDocument from 'pdfkit';
-import { Stream } from 'stream';
+
+// ─────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────
+
+type SlipStatus = 'DRAFT' | 'REVIEW' | 'PENDING' | 'APPROVED' | 'SENT' | 'CONFIRMED' | 'DISPUTED' | 'UNDER_REVIEW' | 'PROCESSED' | 'PAID' | 'REJECTED' | 'CANCELLED';
+
+interface SignatureData {
+    kepalaSDM?: Buffer;
+    keuangan?: Buffer;
+}
+
+interface SlipGajiData {
+    status: SlipStatus;
+    createdAt: string | Date;
+    bulan: number | string;
+    tahun: number | string;
+    gajiKotor: number;
+    totalPotongan: number;
+    gajiBersih: number;
+    karyawan: {
+        nik: string;
+        nama: string;
+        tarifMakan: number;
+        tarifTransport: number;
+        golongan: { nama: string };
+        jabatan: { nama: string };
+    };
+    attendance?: { jumlahHadir: number } | null;
+    detailKomponen: Array<{
+        nama: string;
+        jumlah: number;
+        jenis: 'TUNJANGAN' | 'POTONGAN';
+        kategori: 'TETAP' | 'LAINNYA';
+    }>;
+    signatures?: SignatureData;
+}
+
+// ─────────────────────────────────────────────────────────
+// Watermark
+// ─────────────────────────────────────────────────────────
+
+const WATERMARK_CONFIG: Record<SlipStatus, string | null> = {
+    DRAFT: null, REVIEW: null, PENDING: null, APPROVED: null,
+    SENT: null, CONFIRMED: null, DISPUTED: null, UNDER_REVIEW: null,
+    PROCESSED: null, PAID: 'LUNAS', REJECTED: null, CANCELLED: null,
+};
+
+// ─────────────────────────────────────────────────────────
+// Table helper
+// Draws all content first, then draws ALL grid lines on top.
+// This ensures perfect, unbroken lines with no gaps.
+// ─────────────────────────────────────────────────────────
+
+type CellAlign = 'left' | 'right' | 'center';
+
+interface ColDef {
+    width: number;
+    align?: CellAlign;
+}
+
+interface CellDef {
+    text: string;
+    bold?: boolean;
+    fontSize?: number;
+    color?: string;
+    align?: CellAlign;
+}
+
+interface RowDef {
+    cells: (string | CellDef)[];
+    height?: number;
+    bg?: string;
+}
+
+function drawTable(
+    doc: PDFKit.PDFDocument,
+    x: number,
+    y: number,
+    cols: ColDef[],
+    rows: RowDef[],
+    opts: {
+        borderColor?: string;
+        borderWidth?: number;
+        defaultFontSize?: number;
+        defaultRowHeight?: number;
+        paddingX?: number;
+        paddingY?: number;
+    } = {}
+): number {
+    const {
+        borderColor = '#000000',
+        borderWidth = 0.5,
+        defaultFontSize = 7.5,
+        defaultRowHeight = 17,
+        paddingX = 6,
+        paddingY = 5,
+    } = opts;
+
+    const totalW = cols.reduce((s, c) => s + c.width, 0);
+
+    // ── Pass 1: backgrounds + text ────────────────────────
+    let curY = y;
+    for (const row of rows) {
+        const rh = row.height ?? defaultRowHeight;
+
+        if (row.bg && row.bg !== '#FFFFFF') {
+            doc.rect(x, curY, totalW, rh).fill(row.bg);
+        }
+
+        let curX = x;
+        row.cells.forEach((cell, ci) => {
+            const col = cols[ci];
+            if (!col) return;
+
+            const c: CellDef = typeof cell === 'string'
+                ? { text: cell }
+                : cell;
+
+            const fontSize = c.fontSize ?? defaultFontSize;
+            const align = c.align ?? col.align ?? 'left';
+            const color = c.color ?? '#000000';
+            const font = c.bold ? 'Helvetica-Bold' : 'Helvetica';
+
+            doc.font(font)
+                .fontSize(fontSize)
+                .fillColor(color)
+                .text(c.text, curX + paddingX, curY + paddingY, {
+                    width: col.width - paddingX * 2,
+                    align,
+                    lineBreak: false,
+                });
+
+            curX += col.width;
+        });
+
+        curY += rh;
+    }
+
+    const tableBottom = curY;
+
+    // ── Pass 2: draw ALL grid lines on top ────────────────
+    // Horizontal lines
+    let lineY = y;
+    for (const row of rows) {
+        doc.moveTo(x, lineY).lineTo(x + totalW, lineY)
+            .strokeColor(borderColor).lineWidth(borderWidth).stroke();
+        lineY += row.height ?? defaultRowHeight;
+    }
+    doc.moveTo(x, lineY).lineTo(x + totalW, lineY)
+        .strokeColor(borderColor).lineWidth(borderWidth).stroke();
+
+    // Vertical lines
+    let lineX = x;
+    for (const col of cols) {
+        doc.moveTo(lineX, y).lineTo(lineX, tableBottom)
+            .strokeColor(borderColor).lineWidth(borderWidth).stroke();
+        lineX += col.width;
+    }
+    doc.moveTo(lineX, y).lineTo(lineX, tableBottom)
+        .strokeColor(borderColor).lineWidth(borderWidth).stroke();
+
+    return tableBottom;
+}
+
+// ─────────────────────────────────────────────────────────
+// Main generator
+// ─────────────────────────────────────────────────────────
 
 export class PDFGenerator {
-    static generateSlipGaji(data: any): Promise<Buffer> {
+    static generateSlipGaji(data: SlipGajiData): Promise<Buffer> {
         return new Promise((resolve, reject) => {
-            const doc = new PDFDocument({
-                margin: 0,
-                size: 'A4'
-            });
+            const doc = new PDFDocument({ margin: 0, size: 'A4' });
             const buffers: Buffer[] = [];
-
             doc.on('data', buffers.push.bind(buffers));
             doc.on('end', () => resolve(Buffer.concat(buffers)));
             doc.on('error', reject);
 
-            // --- Configuration & Colors ---
-            const colors = {
-                primary: '#1A365D',    // Deep Blue
-                secondary: '#2C5282',  // Medium Blue
-                teal: '#319795',       // Cyan/Teal
-                income: '#2F855A',     // Green
-                expense: '#C53030',    // Red
-                bgLight: '#F7FAFC',    // Near White
-                textDark: '#2D3748',
-                textLight: '#718096',
-                white: '#FFFFFF'
+            const BLACK = '#000000';
+            const GRAY = '#444444';
+            const HINT = '#888888';
+            const BORDER = '#000000';
+            const BW = 0.5;
+
+            const PAGE_W = 612;
+            const PAGE_H = 841;
+            const MX = 40;
+            const CW = PAGE_W - MX * 2;
+
+            const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
+
+            // ── Header ─────────────────────────────────────
+            doc.fillColor(BLACK).fontSize(13).font('Helvetica-Bold')
+                .text('UNIVERSITAS LAMPUNG', MX, 28);
+            doc.fillColor(GRAY).fontSize(8).font('Helvetica')
+                .text('Biro Keuangan & Sumber Daya Manusia', MX, 44);
+            doc.fillColor(HINT).fontSize(7.5).font('Helvetica')
+                .text(
+                    'Bandar Lampung, ' + new Date(data.createdAt).toLocaleDateString('id-ID', {
+                        day: 'numeric', month: 'long', year: 'numeric',
+                    }),
+                    MX, 56
+                );
+
+            doc.fillColor(BLACK).fontSize(11).font('Helvetica-Bold')
+                .text('SLIP GAJI', PAGE_W - MX - 130, 28, { width: 130, align: 'right' });
+            doc.fillColor(GRAY).fontSize(8).font('Helvetica')
+                .text(`Periode: ${data.bulan} / ${data.tahun}`, PAGE_W - MX - 130, 44, {
+                    width: 130, align: 'right',
+                });
+
+            // ── Divider ────────────────────────────────────
+            let y = 74;
+            doc.moveTo(MX, y).lineTo(PAGE_W - MX, y)
+                .strokeColor(BORDER).lineWidth(BW).stroke();
+
+            // ── Employee Info ──────────────────────────────
+            y += 10;
+            const INFO_RH = 21;
+            const COL2 = CW / 2 - 5;
+            const rightX = MX + CW / 2 + 5;
+
+            const infoField = (lx: number, label: string, value: string, iy: number) => {
+                doc.fillColor(HINT).fontSize(6.5).font('Helvetica')
+                    .text(label.toUpperCase(), lx, iy);
+                doc.fillColor(BLACK).fontSize(8).font('Helvetica-Bold')
+                    .text(value, lx, iy + 9, { width: COL2 });
             };
 
-            const marginX = 40;
-            const contentWidth = 515;
+            infoField(MX, 'NIK', data.karyawan.nik, y);
+            infoField(rightX, 'Golongan', data.karyawan.golongan.nama, y); y += INFO_RH;
+            infoField(MX, 'Nama', data.karyawan.nama, y);
+            infoField(rightX, 'Jabatan', data.karyawan.jabatan.nama, y); y += INFO_RH;
+            infoField(MX, 'Hari Bekerja', `${data.attendance?.jumlahHadir ?? 0} Hari`, y);
+            infoField(rightX, 'Jab. Akademik', '-', y); y += INFO_RH;
+            infoField(MX, 'Tarif Makan/Hari', rp(data.karyawan.tarifMakan), y);
+            infoField(rightX, 'Status', data.status, y); y += INFO_RH;
+            infoField(MX, 'Tarif Transp/Hari', rp(data.karyawan.tarifTransport), y);
 
-            // --- Header Block ---
-            doc.rect(0, 0, 612, 140).fill(colors.primary);
+            y += 20;
+            doc.moveTo(MX, y).lineTo(PAGE_W - MX, y)
+                .strokeColor(BORDER).lineWidth(BW).stroke();
+            y += 10;
 
-            // Circular Logo Placeholder (UNI)
-            doc.circle(80, 70, 35).fill(colors.teal);
-            doc.fillColor(colors.white).fontSize(20).font('Helvetica-Bold').text('UNI', 55, 62, { width: 50, align: 'center' });
+            // ── Build table data ───────────────────────────
+            //
+            // Layout: 4 columns — [label-left | value-left | label-right | value-right]
+            // Left half  = PENDAPATAN
+            // Right half = POTONGAN
 
-            // Title Info
-            doc.fillColor(colors.white).fontSize(18).text('UNIVERSITAS LAMPUNG', 130, 50);
-            doc.fontSize(10).font('Helvetica').text('Biro Keuangan & Sumber Daya Manusia', 130, 75);
-            doc.fontSize(9).text('Bandar Lampung, ' + new Date(data.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }), 130, 95);
+            const HALF = Math.floor(CW / 2);
+            const LBL_W = Math.floor(HALF * 0.70);
+            const VAL_W = HALF - LBL_W;
 
-            // Right Header Box (SLIP GAJI)
-            doc.roundedRect(420, 30, 150, 80, 8).fill(colors.secondary);
-            doc.fillColor(colors.white).fontSize(14).font('Helvetica-Bold').text('SLIP GAJI', 420, 50, { width: 150, align: 'center' });
-            doc.fontSize(10).font('Helvetica').text(`Periode: ${data.bulan}/${data.tahun}`, 420, 75, { width: 150, align: 'center' });
+            const cols: ColDef[] = [
+                { width: LBL_W, align: 'left' },
+                { width: VAL_W, align: 'right' },
+                { width: LBL_W, align: 'left' },
+                { width: VAL_W, align: 'right' },
+            ];
 
-            // --- Employee Info Box ---
-            let currentY = 160;
-            doc.roundedRect(marginX, currentY, contentWidth, 110, 5).strokeColor('#E2E8F0').stroke();
+            const incomeTetap = data.detailKomponen.filter(d => d.jenis === 'TUNJANGAN' && d.kategori === 'TETAP');
+            const incomeLainnya = data.detailKomponen.filter(d => d.jenis === 'TUNJANGAN' && d.kategori === 'LAINNYA');
+            const deductTetap = data.detailKomponen.filter(d => d.jenis === 'POTONGAN' && d.kategori === 'TETAP');
+            const deductLainnya = data.detailKomponen.filter(d => d.jenis === 'POTONGAN' && d.kategori === 'LAINNYA');
 
-            doc.fillColor(colors.textLight).fontSize(9).font('Helvetica');
-            // Left Column
-            doc.text('NIK', marginX + 20, currentY + 15);
-            doc.text('Nama', marginX + 20, currentY + 35);
-            doc.text('Hari Bekerja', marginX + 20, currentY + 55);
-            doc.text('Tarif Makan/Hari', marginX + 20, currentY + 75);
-            doc.text('Tarif Transp/Hari', marginX + 20, currentY + 95);
+            const rows: RowDef[] = [];
 
-            doc.fillColor(colors.textDark).font('Helvetica-Bold');
-            doc.text(data.karyawan.nik, marginX + 110, currentY + 15);
-            doc.text(data.karyawan.nama, marginX + 110, currentY + 35);
-            const jmlHadir = data.tunjanganMakan / data.karyawan.tarifMakan || 0;
-            doc.text(`${jmlHadir} Hari`, marginX + 110, currentY + 55);
-            doc.text(`Rp ${data.karyawan.tarifMakan.toLocaleString()}`, marginX + 110, currentY + 75);
-            doc.text(`Rp ${data.karyawan.tarifTransport.toLocaleString()}`, marginX + 110, currentY + 95);
-
-            // Right Column
-            doc.fillColor(colors.textLight).font('Helvetica');
-            doc.text('Golongan', marginX + 280, currentY + 15);
-            doc.text('Jabatan', marginX + 280, currentY + 35);
-            doc.text('Jab. Akademik', marginX + 280, currentY + 55);
-            doc.text('Status', marginX + 280, currentY + 75);
-
-            doc.fillColor(colors.textDark).font('Helvetica-Bold');
-            doc.text(data.karyawan.golongan.nama, marginX + 370, currentY + 15);
-            doc.text(data.karyawan.jabatan.nama, marginX + 370, currentY + 35);
-            doc.text('-', marginX + 370, currentY + 55); // Placeholder for Jabatan Akademik
-            doc.text('TETAP', marginX + 370, currentY + 75);
-
-            // --- Income vs Deduction Columns ---
-            currentY += 130;
-            const colWidth = 250;
-            const incomeYStart = currentY;
-
-            // Income Header
-            doc.rect(marginX, currentY, colWidth, 25).fill(colors.income);
-            doc.fillColor(colors.white).fontSize(10).font('Helvetica-Bold').text('PENDAPATAN', marginX + 10, currentY + 8);
-
-            currentY += 25;
-            const renderItem = (y: number, label: string, value: number) => {
-                doc.rect(marginX, y, colWidth, 20).fill(y % 40 === 0 ? colors.bgLight : colors.white);
-                doc.fillColor(colors.textDark).fontSize(9).font('Helvetica').text(label, marginX + 10, y + 6);
-                doc.font('Helvetica-Bold').text(`Rp ${value.toLocaleString()}`, marginX + 10, y + 6, { width: colWidth - 20, align: 'right' });
-                return y + 20;
-            };
-
-            let incomeY = currentY;
-            incomeY = renderItem(incomeY, 'Gaji Pokok', data.gajiPokok);
-            incomeY = renderItem(incomeY, 'Tunjangan Golongan', data.tunjanganGolongan);
-            incomeY = renderItem(incomeY, 'Total Tunj. Makan', data.tunjanganMakan);
-            incomeY = renderItem(incomeY, 'Total Tunj. Transport', data.tunjanganTransport);
-
-            // Group: TETAP
-            const incomeTetap = data.detailKomponen.filter((d: any) => d.jenis === 'TUNJANGAN' && d.kategori === 'TETAP');
-            incomeTetap.forEach((d: any) => {
-                incomeY = renderItem(incomeY, d.nama, d.jumlah);
+            // Header row
+            const hdrCell = (text: string): CellDef => ({
+                text, bold: false, fontSize: 8,
+            });
+            rows.push({
+                height: 18,
+                cells: [hdrCell('PENDAPATAN'), hdrCell('Jumlah'), hdrCell('POTONGAN'), hdrCell('')],
             });
 
-            // Deductions Column (Start rendering to calculate deductY)
-            let deductY = incomeYStart;
-            const deductX = marginX + colWidth + 15;
-            doc.rect(deductX, deductY, colWidth, 25).fill(colors.expense);
-            doc.fillColor(colors.white).fontSize(10).font('Helvetica-Bold').text('POTONGAN', deductX + 10, deductY + 8);
-
-            deductY += 25;
-            const renderDeduct = (y: number, label: string, value: number) => {
-                doc.rect(deductX, y, colWidth, 20).fill(y % 40 === 0 ? colors.bgLight : colors.white);
-                doc.fillColor(colors.textDark).fontSize(9).font('Helvetica').text(label, deductX + 10, y + 6);
-                doc.font('Helvetica-Bold').text(`Rp ${value.toLocaleString()}`, deductX + 10, y + 6, { width: colWidth - 20, align: 'right' });
-                return y + 20;
-            };
-
-            // Group: TETAP
-            const deductTetap = data.detailKomponen.filter((d: any) => d.jenis === 'POTONGAN' && d.kategori === 'TETAP');
-            deductTetap.forEach((d: any) => {
-                deductY = renderDeduct(deductY, d.nama, d.jumlah);
-            });
-
-            // --- SYNC POINT: Align "LAINNYA" sections ---
-            const maxYForLainnya = Math.max(incomeY, deductY) + 5;
-            incomeY = maxYForLainnya;
-            deductY = maxYForLainnya;
-
-            // Render Income LAINNYA
-            const incomeLain = data.detailKomponen.filter((d: any) => d.jenis === 'TUNJANGAN' && d.kategori === 'LAINNYA');
-            if (incomeLain.length > 0) {
-                doc.fillColor(colors.textLight).fontSize(7).text('KOMPONEN LAINNYA', marginX + 10, incomeY + 2);
-                incomeY += 12;
-                incomeLain.forEach((d: any) => {
-                    incomeY = renderItem(incomeY, d.nama, d.jumlah);
+            // Pair tetap rows side by side
+            const maxTetap = Math.max(incomeTetap.length, deductTetap.length);
+            for (let i = 0; i < maxTetap; i++) {
+                const inc = incomeTetap[i];
+                const dec = deductTetap[i];
+                rows.push({
+                    cells: [
+                        inc ? inc.nama : '',
+                        inc ? rp(inc.jumlah) : '',
+                        dec ? dec.nama : '',
+                        dec ? rp(dec.jumlah) : '',
+                    ],
                 });
             }
 
-            // Render Deduction LAINNYA
-            const deductLain = data.detailKomponen.filter((d: any) => d.jenis === 'POTONGAN' && d.kategori === 'LAINNYA');
-            if (deductLain.length > 0) {
-                doc.fillColor(colors.textLight).fontSize(7).text('KOMPONEN LAINNYA', deductX + 10, deductY + 2);
-                deductY += 12;
-                deductLain.forEach((d: any) => {
-                    deductY = renderDeduct(deductY, d.nama, d.jumlah);
+            // "Lainnya" sub-header + rows
+            const hasLainnya = incomeLainnya.length > 0 || deductLainnya.length > 0;
+            if (hasLainnya) {
+                const subCell = (text: string): CellDef => ({
+                    text, bold: true, fontSize: 7, color: HINT,
+                });
+                rows.push({
+                    height: 15,
+                    cells: [
+                        subCell(incomeLainnya.length > 0 ? 'Lainnya' : ''),
+                        subCell(''),
+                        subCell(deductLainnya.length > 0 ? 'Lainnya' : ''),
+                        subCell(''),
+                    ],
+                });
+                const maxLainnya = Math.max(incomeLainnya.length, deductLainnya.length);
+                for (let i = 0; i < maxLainnya; i++) {
+                    const inc = incomeLainnya[i];
+                    const dec = deductLainnya[i];
+                    rows.push({
+                        cells: [
+                            inc ? inc.nama : '',
+                            inc ? rp(inc.jumlah) : '',
+                            dec ? dec.nama : '',
+                            dec ? rp(dec.jumlah) : '',
+                        ],
+                    });
+                }
+            }
+
+            // No deduction fallback
+            if (deductTetap.length === 0 && deductLainnya.length === 0 && maxTetap === 0) {
+                rows.push({ cells: ['', '', '-', ''] });
+            }
+
+            // Subtotal row
+            const totalCell = (text: string): CellDef => ({
+                text, bold: true, fontSize: 8,
+            });
+            rows.push({
+                height: 20,
+                cells: [
+                    totalCell('Penerimaan Kotor'),
+                    totalCell(rp(data.gajiKotor)),
+                    totalCell('Jumlah Potongan'),
+                    totalCell(rp(data.totalPotongan)),
+                ],
+            });
+
+            // ── Draw table ─────────────────────────────────
+            const afterTable = drawTable(doc, MX, y, cols, rows, {
+                borderColor: BORDER,
+                borderWidth: BW,
+                defaultFontSize: 7.5,
+                defaultRowHeight: 17,
+                paddingX: 6,
+                paddingY: 5,
+            });
+
+            // ── THP row (full width) ───────────────────────
+            //   Drawn as a single merged row manually, then grid on top
+            const THP_H = 26;
+            const thpY = afterTable;
+
+            // Text
+            doc.fillColor(HINT).fontSize(7).font('Helvetica')
+                .text('Penerimaan Bersih (THP)', MX + 6, thpY + 5);
+            doc.fillColor(BLACK).fontSize(11).font('Helvetica-Bold')
+                .text(rp(data.gajiBersih), MX + 6, thpY + 11,
+                    { width: CW - 12, align: 'right' });
+
+            // Grid lines (top already drawn by table; draw bottom + sides)
+            doc.moveTo(MX, thpY + THP_H).lineTo(MX + CW, thpY + THP_H)
+                .strokeColor(BORDER).lineWidth(BW).stroke();
+            doc.moveTo(MX, thpY).lineTo(MX, thpY + THP_H)
+                .strokeColor(BORDER).lineWidth(BW).stroke();
+            doc.moveTo(MX + CW, thpY).lineTo(MX + CW, thpY + THP_H)
+                .strokeColor(BORDER).lineWidth(BW).stroke();
+
+            // ── Signatures ─────────────────────────────────
+            const thpBottom = thpY + THP_H;
+            let sigY = thpBottom + 22;
+            const SIG_W = 130;
+            const SIG_H = 40;
+            const sigLineY = sigY + SIG_H + 4;
+
+            doc.fillColor(HINT).fontSize(7).font('Helvetica').text('Mengetahui,', MX, sigY);
+            if (data.signatures?.kepalaSDM) {
+                doc.image(data.signatures.kepalaSDM, MX, sigY + 8, {
+                    width: SIG_W, height: SIG_H, fit: [SIG_W, SIG_H],
+                    align: 'center', valign: 'bottom',
                 });
             }
+            doc.moveTo(MX, sigLineY).lineTo(MX + SIG_W, sigLineY)
+                .strokeColor(BORDER).lineWidth(BW).stroke();
+            doc.fillColor(BLACK).fontSize(8).font('Helvetica-Bold')
+                .text('Kepala Biro SDM', MX, sigLineY + 4);
 
-            if (data.detailKomponen.filter((d: any) => d.jenis === 'POTONGAN').length === 0 && deductTetap.length === 0) {
-                deductY = renderDeduct(deductY, '-', 0);
+            const sigRightX = PAGE_W - MX - SIG_W;
+            doc.fillColor(HINT).fontSize(7).font('Helvetica').text('Hormat kami,', sigRightX, sigY);
+            if (data.signatures?.keuangan) {
+                doc.image(data.signatures.keuangan, sigRightX, sigY + 8, {
+                    width: SIG_W, height: SIG_H, fit: [SIG_W, SIG_H],
+                    align: 'center', valign: 'bottom',
+                });
             }
+            doc.moveTo(sigRightX, sigLineY).lineTo(sigRightX + SIG_W, sigLineY)
+                .strokeColor(BORDER).lineWidth(BW).stroke();
+            doc.fillColor(BLACK).fontSize(8).font('Helvetica-Bold')
+                .text('Bagian Keuangan', sigRightX, sigLineY + 4);
 
-
-            // --- Footer Summary ---
-            currentY = Math.max(incomeY, deductY) + 10;
-            doc.roundedRect(marginX, currentY, contentWidth, 60, 5).strokeColor('#E2E8F0').stroke();
-
-            const cellW = contentWidth / 3;
-            doc.fillColor(colors.textLight).fontSize(8).text('PENERIMAAN KOTOR', marginX + 20, currentY + 15);
-            doc.fillColor(colors.textDark).fontSize(12).font('Helvetica-Bold').text(`Rp ${data.gajiKotor.toLocaleString()}`, marginX + 20, currentY + 30);
-
-            doc.fillColor(colors.textLight).fontSize(8).text('JUMLAH POTONGAN', marginX + cellW + 20, currentY + 15);
-            doc.fillColor(colors.expense).fontSize(12).font('Helvetica-Bold').text(`Rp ${data.totalPotongan.toLocaleString()}`, marginX + cellW + 20, currentY + 30);
-
-            doc.fillColor(colors.textLight).fontSize(8).text('PENERIMAAN BERSIH (THP)', marginX + cellW * 2 + 20, currentY + 15);
-            doc.fillColor(colors.income).fontSize(14).font('Helvetica-Bold').text(`Rp ${data.gajiBersih.toLocaleString()}`, marginX + cellW * 2 + 20, currentY + 30);
-
-            // --- Signatures ---
-            currentY += 100;
-            doc.fillColor(colors.textDark).fontSize(10).font('Helvetica');
-            doc.text('Mengetahui,', marginX, currentY);
-            doc.text('Hormat kami,', marginX + 350, currentY);
-
-            currentY += 60;
-            doc.font('Helvetica-Bold').text('Kepala Biro SDM', marginX, currentY);
-            doc.text('Bagian Keuangan', marginX + 350, currentY);
+            // ── Watermark ──────────────────────────────────
+            const wmText = WATERMARK_CONFIG[data.status];
+            if (wmText) {
+                doc.save();
+                doc.translate(PAGE_W / 2, PAGE_H / 2);
+                doc.rotate(-45);
+                doc.fontSize(80).font('Helvetica-Bold')
+                    .fillColor('#000000').fillOpacity(0.07)
+                    .text(wmText, -200, -40, { width: 400, align: 'center', lineBreak: false });
+                doc.rect(-210, -55, 420, 90)
+                    .strokeColor('#000000').strokeOpacity(0.08).lineWidth(0.5).stroke();
+                doc.restore();
+                doc.fillOpacity(1).strokeOpacity(1);
+            }
 
             doc.end();
         });

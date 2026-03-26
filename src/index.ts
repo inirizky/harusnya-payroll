@@ -23,7 +23,7 @@ app.use("*", cors({
 // Routes
 app.get('/', (c) => c.text('Employee Payroll API is running!'));
 app.route('/api/master', masterRoute);
-app.route('/api/attendance', attendanceRoute);
+app.route('/api/kehadiran', attendanceRoute);
 app.route('/api/karyawan', employeeRoute);
 app.route('/api/payroll', payrollRoute);
 

@@ -12,7 +12,7 @@ datasource db {
 model Golongan {
   id                Int        @id @default(autoincrement())
   nama              String     @unique // cth: "Golongan I", "Golongan II"
-  tunjanganGolongan Float      // Tunjangan spesifik tiap golongan
+  tunjanganGolongan Float // Tunjangan spesifik tiap golongan
   karyawan          Karyawan[]
 }
 
@@ -23,26 +23,49 @@ model Jabatan {
 }
 
 model Karyawan {
-  id             Int       @id @default(autoincrement())
-  nik            String    @unique
+  id             Int    @id @default(autoincrement())
+  nik            String @unique
   nama           String
-  gajiPokok      Float     // Gaji pokok spesifik untuk karyawan ini
-  tarifMakan     Float     // Tarif tunjangan makan per hari/kehadiran
-  tarifTransport Float     // Tarif tunjangan transport per hari/kehadiran
-  
-  golonganId     Int
-  golongan       Golongan  @relation(fields: [golonganId], references: [id])
-  jabatanId      Int
-  jabatan        Jabatan   @relation(fields: [jabatanId], references: [id])
+  gajiPokok      Float // Gaji pokok spesifik untuk karyawan ini
+  tarifMakan     Float // Tarif tunjangan makan per hari/kehadiran
+  tarifTransport Float // Tarif tunjangan transport per hari/kehadiran
 
-  komponenTetap  KomponenTetap[]
-  kehadiran      Kehadiran[]
-  slipGaji       SlipGaji[]
+  golonganId Int
+  golongan   Golongan @relation(fields: [golonganId], references: [id])
+  jabatanId  Int
+  jabatan    Jabatan  @relation(fields: [jabatanId], references: [id])
+
+  komponenTetap KomponenTetap[]
+  kehadiran     Kehadiran[]
+  slipGaji      SlipGaji[]
 }
 
 enum JenisKomponen {
   TUNJANGAN
   POTONGAN
+}
+
+enum SlipGajiStatus {
+  DRAFT
+  REVIEW
+  PENDING
+  APPROVED
+  SENT
+  CONFIRMED
+  DISPUTED
+  UNDER_REVIEW
+  PROCESSED
+  PAID
+  REJECTED
+  CANCELLED
+}
+
+// Master komponen default (template global)
+model KomponenDefault {
+  id     Int           @id @default(autoincrement())
+  nama   String        @unique
+  jenis  JenisKomponen
+  jumlah Float // Nilai default, bisa di-override per karyawan
 }
 
 // Tunjangan & Potongan Tetap yang berlaku setiap bulan (bisa ditambah/diedit)
@@ -51,7 +74,7 @@ model KomponenTetap {
   karyawanId Int
   karyawan   Karyawan      @relation(fields: [karyawanId], references: [id], onDelete: Cascade)
   jenis      JenisKomponen // TUNJANGAN atau POTONGAN
-  nama       String        // cth: "BPJS Kesehatan", "Potongan Koperasi"
+  nama       String // cth: "BPJS Kesehatan", "Potongan Koperasi"
   jumlah     Float
 }
 
@@ -62,47 +85,42 @@ model Kehadiran {
   id          Int      @id @default(autoincrement())
   karyawanId  Int
   karyawan    Karyawan @relation(fields: [karyawanId], references: [id], onDelete: Cascade)
-  bulan       Int      // 1-12
+  bulan       Int // 1-12
   tahun       Int
   jumlahHadir Int
 
   @@unique([karyawanId, bulan, tahun]) // 1 karyawan 1 rekap per bulan
 }
 
-// Data historis penggajian (Snapshot)
+enum KategoriKomponen {
+  TETAP
+  LAINNYA
+}
+
 model SlipGaji {
-  id                   Int      @id @default(autoincrement())
-  karyawanId           Int
-  karyawan             Karyawan @relation(fields: [karyawanId], references: [id])
-  bulan                Int
-  tahun                Int
-  
-  // Snapshot Data Utama (Di-copy saat generate)
-  gajiPokok            Float
-  tunjanganGolongan    Float
-  tunjanganMakan       Float    // Hasil: tarifMakan * jumlahHadir
-  tunjanganTransport   Float    // Hasil: tarifTransport * jumlahHadir
-  
-  // Rincian Komponen Tetap & Lainnya pada bulan tersebut
-  detailKomponen       DetailSlipGaji[]
-
-  // Hasil Kalkulasi Akhir
-  gajiKotor            Float    // Total semua pendapatan (Gaji Pokok + Semua Tunjangan)
-  totalPotongan        Float    // Total semua potongan
-  gajiBersih           Float    // Gaji Kotor - Total Potongan
-
-  createdAt            DateTime @default(now())
+  id             Int              @id @default(autoincrement())
+  karyawanId     Int
+  karyawan       Karyawan         @relation(fields: [karyawanId], references: [id])
+  bulan          Int
+  tahun          Int
+  gajiKotor      Float
+  status         SlipGajiStatus   @default(DRAFT)
+  catatanBanding String? // Diisi karyawan jika DISPUTED
+  totalPotongan  Float
+  gajiBersih     Float
+  detailKomponen DetailSlipGaji[]
+  createdAt      DateTime         @default(now())
 
   @@unique([karyawanId, bulan, tahun])
 }
 
-// Rincian tambahan untuk Slip Gaji (Mengakomodasi Tetap + Lain-lain)
 model DetailSlipGaji {
-  id         Int           @id @default(autoincrement())
+  id         Int              @id @default(autoincrement())
   slipGajiId Int
-  slipGaji   SlipGaji      @relation(fields: [slipGajiId], references: [id], onDelete: Cascade)
-  jenis      JenisKomponen // TUNJANGAN atau POTONGAN
-  kategori   String        // "TETAP" atau "LAINNYA" (Untuk membedakan asal usul input)
+  slipGaji   SlipGaji         @relation(fields: [slipGajiId], references: [id], onDelete: Cascade)
+  jenis      JenisKomponen
+  kategori   KategoriKomponen // ← enum, bukan String lagi
   nama       String
   jumlah     Float
+  keterangan String? // ← untuk audit trail (opsional)
 }
