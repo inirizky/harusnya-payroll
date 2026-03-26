@@ -86,7 +86,8 @@ payrollRoute.get('/view/:slipId', async (c) => {
 
     const pdfBuffer = await PDFGenerator.generateSlipGaji(payrollData);
 
-    return new Response(pdfBuffer, {
+    return new Response(new Uint8Array(pdfBuffer), {
+        status: 200,
         headers: {
             'Content-Type': 'application/pdf',
             'Content-Disposition': `inline; filename="slip-gaji-${payrollData.karyawan.nik}-${payrollData.bulan}-${payrollData.tahun}.pdf"`
