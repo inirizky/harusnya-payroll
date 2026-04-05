@@ -303,7 +303,8 @@ export class PayrollExcelService {
 
         // ── Build Workbook ────────────────────────────────────────────────────────
         const buffer = await wb.xlsx.writeBuffer();
-        return buffer as Buffer;
+        // Menggunakan cast unknown ke Buffer untuk mengatasi konflik tipe Buffer antara ExcelJS dan Node
+        return buffer as unknown as Buffer;
     }
 
     /**
@@ -311,7 +312,8 @@ export class PayrollExcelService {
      */
     static async importFromExcel(buffer: Buffer, bulan: number, tahun: number) {
         const wb = new ExcelJS.Workbook();
-        await wb.xlsx.load(buffer);
+        // Menggunakan cast any untuk menghindari konflik tipe Buffer saat loading ke ExcelJS
+        await wb.xlsx.load(buffer as any);
         const ws = wb.worksheets[0];
 
         if (!ws || ws.rowCount < 4) throw new Error('Format Excel tidak valid: Data terlalu sedikit.');
