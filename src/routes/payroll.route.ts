@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { PayrollService } from '../services/payroll.service.js';
-import { PayrollGenerateSchema, PayrollUpdateSchema } from '../types/schemas.js';
+import { PayrollExcelService } from '../services/payroll-excel.service.js';
+import { PayrollGenerateSchema, PayrollUpdateSchema, PayrollExportSchema } from '../types/schemas.js';
 import { PDFGenerator } from '../lib/pdf-generator.js';
 
 const payrollRoute = new Hono();
@@ -13,6 +14,52 @@ payrollRoute.get('/', async (c) => {
         success: true,
         data: payrolls
     });
+});
+
+// GET /api/payroll/export-excel
+payrollRoute.get('/export-excel', zValidator('query', PayrollExportSchema), async (c) => {
+    const { bulan, tahun } = c.req.valid('query');
+    try {
+        const buffer = await PayrollExcelService.exportToExcel(bulan, tahun);
+        return new Response(new Uint8Array(buffer), {
+            status: 200,
+            headers: {
+                'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Content-Disposition': `attachment; filename="payroll-template-${bulan}-${tahun}.xlsx"`
+            }
+        });
+    } catch (error: any) {
+        return c.json({ success: false, message: error.message }, 400);
+    }
+});
+
+// POST /api/payroll/import-excel
+payrollRoute.post('/import-excel', async (c) => {
+    try {
+        const body = await c.req.parseBody();
+        const file = body['file'];
+        const bulan = Number(body['bulan']);
+        const tahun = Number(body['tahun']);
+
+        if (!file || typeof file === 'string') {
+            return c.json({ success: false, message: 'Excel file is required' }, 400);
+        }
+
+        if (isNaN(bulan) || isNaN(tahun)) {
+            return c.json({ success: false, message: 'Invalid month or year' }, 400);
+        }
+
+        const buffer = Buffer.from(await (file as File).arrayBuffer());
+        const result = await PayrollExcelService.importFromExcel(buffer, bulan, tahun);
+
+        return c.json({
+            success: true,
+            message: `Berhasil generate ${result.totalProcessed} slip gaji bulan ${bulan}/${tahun}`,
+            data: result
+        });
+    } catch (error: any) {
+        return c.json({ success: false, message: error.message }, 400);
+    }
 });
 
 // POST /api/payroll/generate

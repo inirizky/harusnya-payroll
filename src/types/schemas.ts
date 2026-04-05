@@ -65,3 +65,14 @@ export const KehadiranSchema = z.object({
     tahun: z.number(),
     jumlahHadir: z.number().min(0).max(31),
 });
+
+export const PayrollExportSchema = z.object({
+    bulan: z.coerce.number().min(1).max(12),
+    tahun: z.coerce.number(),
+});
+
+export const PayrollImportSchema = z.object({
+    bulan: z.coerce.number().min(1).max(12),
+    tahun: z.coerce.number(),
+    // file is usually handled separately in hono, but we can add it here if needed
+});
