@@ -166,6 +166,9 @@ export class PayrollService {
 
     static async getAll() {
         return await prisma.slipGaji.findMany({
+            where: {
+                deletedAt: null
+            },
             select: {
                 id: true,
                 bulan: true,
@@ -182,14 +185,14 @@ export class PayrollService {
                 },
             },
             orderBy: {
-                createdAt: 'desc',
+                createdAt: 'asc',
             },
         });
     }
 
     static async getById(id: number) {
-        const slip = await prisma.slipGaji.findUnique({
-            where: { id },
+        const slip = await prisma.slipGaji.findFirst({
+            where: { id, deletedAt: null },
             include: {
 
                 karyawan: {
@@ -233,10 +236,10 @@ export class PayrollService {
         let newGajiBersih = existingSlip.gajiBersih;
 
         // check if any component lists are provided
-        const hasComponents = data.tunjanganTetap !== undefined || 
-                             data.potonganTetap !== undefined || 
-                             data.tunjanganLain !== undefined || 
-                             data.potonganLain !== undefined;
+        const hasComponents = data.tunjanganTetap !== undefined ||
+            data.potonganTetap !== undefined ||
+            data.tunjanganLain !== undefined ||
+            data.potonganLain !== undefined;
 
         if (hasComponents) {
             // Delete ALL existing components for this slip to rebuild
@@ -245,7 +248,7 @@ export class PayrollService {
             });
 
             const newDetails: any[] = [];
-            
+
             // Re-map all provided components
             data.tunjanganTetap?.forEach(t => newDetails.push({ slipGajiId: id, nama: t.nama, jenis: 'TUNJANGAN', kategori: 'TETAP', jumlah: t.jumlah }));
             data.potonganTetap?.forEach(p => newDetails.push({ slipGajiId: id, nama: p.nama, jenis: 'POTONGAN', kategori: 'TETAP', jumlah: p.jumlah }));
@@ -285,6 +288,27 @@ export class PayrollService {
             include: {
                 detailKomponen: true
             }
+        });
+    }
+
+    static async delete(id: number) {
+        const slip = await prisma.slipGaji.findUnique({
+            where: { id },
+            select: { status: true, deletedAt: true }
+        });
+
+        if (!slip || slip.deletedAt) {
+            throw new Error('Slip Gaji tidak ditemukan atau sudah dihapus');
+        }
+
+        // Proteksi: Data yang sudah dibayar biasanya tidak boleh dihapus secara hukum/audit
+        if (slip.status === 'PAID') {
+            throw new Error('Slip Gaji yang sudah dibayar tidak dapat dihapus');
+        }
+
+        return await prisma.slipGaji.update({
+            where: { id },
+            data: { deletedAt: new Date() } // Isi tanggal sebagai tanda "terhapus"
         });
     }
 }

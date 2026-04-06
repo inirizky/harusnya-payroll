@@ -109,7 +109,9 @@ model SlipGaji {
   totalPotongan  Float
   gajiBersih     Float
   detailKomponen DetailSlipGaji[]
+  deletedAt      DateTime? // Kolom baru untuk Soft Delete
   createdAt      DateTime         @default(now())
+  updatedAt      DateTime?        @updatedAt
 
   @@unique([karyawanId, bulan, tahun])
 }
