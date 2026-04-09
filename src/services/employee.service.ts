@@ -27,6 +27,7 @@ export class EmployeeService {
 
     static async getAll() {
         return await prisma.karyawan.findMany({
+
             select: {
                 id: true,
                 nik: true,
@@ -53,9 +54,14 @@ export class EmployeeService {
                         jenis: true,
                         jumlah: true,
                     },
+
                 },
 
-            }
+            },
+            orderBy: {
+                nama: 'asc',
+            },
+
 
         });
     }
@@ -71,5 +77,36 @@ export class EmployeeService {
                 kehadiran: true,
             },
         });
+    }
+    static async update(id: number, data: KaryawanCreateInput) {
+        // Pindahkan business logic (pengecekan eksistensi data) ke Service
+        const existingEmployee = await prisma.karyawan.findUnique({ where: { id } });
+
+        if (!existingEmployee) {
+            // Lempar error spesifik jika data tidak ada
+            throw new Error("EMPLOYEE_NOT_FOUND");
+        }
+
+        const { komponenTetap, ...employeeData } = data;
+
+        return await prisma.karyawan.update({
+            where: { id },
+            data: {
+                ...employeeData,
+                komponenTetap: komponenTetap ? {
+                    deleteMany: {},
+                    create: komponenTetap,
+                } : undefined,
+            },
+            include: {
+                komponenTetap: true,
+                golongan: true,
+                jabatan: true,
+            },
+        });
+    }
+
+    static async delete(id: number) {
+        return await prisma.karyawan.delete({ where: { id } });
     }
 }

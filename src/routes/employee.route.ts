@@ -12,7 +12,7 @@ employeeRoute.post('/', zValidator('json', KaryawanCreateSchema), async (c) => {
 
     return c.json({
         success: true,
-        data: employee
+        message: 'Karyawan berhasil dibuat',
     }, 201);
 });
 
@@ -37,6 +37,28 @@ employeeRoute.get('/:id', async (c) => {
     return c.json({
         success: true,
         data: employee
+    });
+});
+
+employeeRoute.put('/:id', zValidator('json', KaryawanCreateSchema), async (c) => {
+    const id = parseInt(c.req.param('id'));
+    const data = c.req.valid('json');
+
+    // Route hanya memanggil service, tidak ada business logic di sini
+    await EmployeeService.update(id, data);
+
+    return c.json({
+        success: true,
+        message: 'Karyawan berhasil diperbarui',
+    });
+});
+
+employeeRoute.delete('/:id', async (c) => {
+    const id = parseInt(c.req.param('id'));
+    await EmployeeService.delete(id);
+    return c.json({
+        success: true,
+        message: 'Karyawan berhasil dihapus',
     });
 });
 

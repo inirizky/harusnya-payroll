@@ -183,6 +183,7 @@ export class PayrollService {
                         nama: true,
                     },
                 },
+                status: true,
             },
             orderBy: {
                 createdAt: 'asc',
