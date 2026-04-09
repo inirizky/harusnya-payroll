@@ -1,8 +1,13 @@
 import prisma from '../configs/database.js';
 
 export class AttendanceService {
-    static async getAll() {
+    static async getAll(bulan?: number, tahun?: number) {
+        // 2. Buat object filter dinamis
+        const whereCondition: any = {};
+        if (bulan) whereCondition.bulan = bulan;
+        if (tahun) whereCondition.tahun = tahun;
         return await prisma.kehadiran.findMany({
+            where: whereCondition,
             include: {
                 karyawan: true,
             },

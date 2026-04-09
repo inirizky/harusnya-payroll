@@ -177,13 +177,10 @@ export class PayrollService {
                 gajiKotor: true,
                 totalPotongan: true,
                 createdAt: true,
-                karyawan: {
-                    select: {
-                        id: true,
-                        nama: true,
-                    },
-                },
+                karyawan: true,
                 status: true,
+                detailKomponen: true,
+                catatanBanding: true,
             },
             orderBy: {
                 createdAt: 'asc',

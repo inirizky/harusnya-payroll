@@ -7,7 +7,18 @@ const attendanceRoute = new Hono();
 
 // GET /api/attendance
 attendanceRoute.get('/', async (c) => {
-    const output = await AttendanceService.getAll();
+    // 1. Ambil query string dari request
+    const bulanQuery = c.req.query('bulan');
+    const tahunQuery = c.req.query('tahun');
+
+    // 2. Parsing string menjadi number (jika ada)
+    const bulan = bulanQuery ? parseInt(bulanQuery) : undefined;
+    const tahun = tahunQuery ? parseInt(tahunQuery) : undefined;
+
+    console.log(bulan);
+
+    // 3. Teruskan ke service
+    const output = await AttendanceService.getAll(bulan, tahun);
     return c.json({ success: true, data: output });
 });
 
