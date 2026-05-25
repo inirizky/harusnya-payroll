@@ -9,11 +9,14 @@ const payrollRoute = new Hono();
 
 // GET /api/payroll
 payrollRoute.get('/', async (c) => {
-    const payrolls = await PayrollService.getAll();
-    return c.json({
-        success: true,
-        data: payrolls
+    const { bulan, tahun, page, limit } = c.req.query();
+    const result = await PayrollService.getAll({
+        bulan: bulan ? Number(bulan) : undefined,
+        tahun: tahun ? Number(tahun) : undefined,
+        page: page ? Number(page) : 1,
+        limit: limit ? Number(limit) : 10,
     });
+    return c.json({ success: true, ...result });
 });
 
 // GET /api/payroll/export-excel
@@ -61,6 +64,42 @@ payrollRoute.post('/import-excel', async (c) => {
         return c.json({ success: false, message: error.message }, 400);
     }
 });
+
+// POST /api/payroll/import-honor-mengajar
+payrollRoute.post('/import-honor-mengajar', async (c) => {
+    try {
+        const body = await c.req.parseBody();
+        const file = body['file'];
+        const bulan = Number(body['bulan']);
+        const tahun = Number(body['tahun']);
+        const namaKomponen = body['namaKomponen']?.toString().trim(); // 👈
+
+        if (!file || typeof file === 'string') {
+            return c.json({ success: false, message: 'File CSV/Excel is required' }, 400);
+        }
+
+        if (isNaN(bulan) || isNaN(tahun)) {
+            return c.json({ success: false, message: 'Invalid month or year' }, 400);
+        }
+
+        // 👇
+        if (!namaKomponen) {
+            return c.json({ success: false, message: 'Nama komponen tidak boleh kosong' }, 400);
+        }
+
+        const buffer = Buffer.from(await (file as File).arrayBuffer());
+        const result = await PayrollExcelService.importHonorMengajar(buffer, bulan, tahun, namaKomponen); // 👈
+
+        return c.json({
+            success: true,
+            message: `Berhasil memproses honor mengajar untuk ${result.totalProcessed} karyawan`,
+            data: result
+        });
+    } catch (error: any) {
+        return c.json({ success: false, message: error.message }, 400);
+    }
+});
+
 
 // POST /api/payroll/generate
 payrollRoute.post('/generate', zValidator('json', PayrollGenerateSchema), async (c) => {

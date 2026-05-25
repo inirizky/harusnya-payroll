@@ -264,4 +264,189 @@ export class PayrollExcelService {
             errors: errors.length > 0 ? errors : undefined
         };
     }
+
+    // ── IMPORT HONOR MENGAJAR FUNCTION ───────────────────────────────────────────
+    static async importHonorMengajar(buffer: Buffer, bulan: number, tahun: number, namaKomponen: string) {
+        const wb = XLSX.read(buffer, { type: 'buffer' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+
+        const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        if (!rows || rows.length === 0) {
+            throw new Error('Format file tidak valid atau data kosong.');
+        }
+
+        let headerRowIndex = -1;
+        let nikKey = '';
+        let honorKey = '';
+
+        for (let r = 0; r < rows.length; r++) {
+            const row = rows[r];
+            if (!row || row.length === 0) continue;
+
+            const nikIdx = row.findIndex(cell => cell && cell.toString().toLowerCase().replace(/[\s._-]/g, '') === 'nik');
+            if (nikIdx !== -1) {
+                const honorIdx = row.findIndex((cell, idx) => {
+                    if (!cell || idx === nikIdx) return false;
+                    const cleanK = cell.toString().toLowerCase();
+                    return cleanK.includes('honor') || cleanK.includes('mengajar') || cleanK.includes('nominal') || cleanK.includes('jumlah');
+                });
+
+                if (honorIdx !== -1) {
+                    headerRowIndex = r;
+                    nikKey = row[nikIdx].toString();
+                    honorKey = row[honorIdx].toString();
+                    break;
+                }
+            }
+        }
+
+        if (headerRowIndex === -1) {
+            throw new Error('Format file tidak valid. Pastikan terdapat kolom NIK dan Honor Mengajar/Nominal.');
+        }
+
+        const data: any[] = XLSX.utils.sheet_to_json(ws, { range: headerRowIndex });
+        if (!data || data.length === 0) {
+            throw new Error('Format file tidak valid atau tidak ada data.');
+        }
+
+        const errors: string[] = [];
+        const updateDataArray: {
+            slipId: number;
+            gajiKotor: number;
+            totalPotongan: number;
+            gajiBersih: number;
+            newDetails: any[];
+        }[] = [];
+
+        const rawNiks = data.map(row => row[nikKey]?.toString().trim()).filter(Boolean);
+        const niks = Array.from(new Set(rawNiks));
+
+        if (niks.length === 0) {
+            throw new Error('Tidak ada data NIK yang valid dalam file.');
+        }
+
+        const employees = await prisma.karyawan.findMany({
+            where: { nik: { in: niks } },
+            select: { id: true, nik: true, nama: true }
+        });
+        const empMap = new Map(employees.map(e => [e.nik, e]));
+
+        const existingSlips = await prisma.slipGaji.findMany({
+            where: {
+                karyawanId: { in: employees.map(e => e.id) },
+                bulan,
+                tahun,
+                deletedAt: null
+            },
+            include: { detailKomponen: true }
+        });
+        const slipMap = new Map(existingSlips.map(s => [s.karyawanId, s]));
+
+        const namaKomponenLower = namaKomponen.trim().toLowerCase();
+
+        for (let i = 0; i < data.length; i++) {
+            const row = data[i];
+            const rawNik = row[nikKey]?.toString().trim();
+            const rawHonor = row[honorKey];
+
+            if (!rawNik && (rawHonor === undefined || rawHonor === null || rawHonor === '')) continue;
+
+            if (!rawNik) {
+                errors.push(`Baris ${i + headerRowIndex + 2}: NIK kosong.`);
+                continue;
+            }
+
+            const employee = empMap.get(rawNik);
+            if (!employee) {
+                errors.push(`Baris ${i + headerRowIndex + 2}: Karyawan dengan NIK "${rawNik}" tidak ditemukan di database.`);
+                continue;
+            }
+
+            const honorAmount = Number(rawHonor);
+            if (isNaN(honorAmount) || honorAmount < 0) {
+                errors.push(`Baris ${i + headerRowIndex + 2} (${employee.nama}): Nominal honor tidak valid.`);
+                continue;
+            }
+
+            const slip = slipMap.get(employee.id);
+            if (!slip) {
+                errors.push(`Baris ${i + headerRowIndex + 2} (${employee.nama}): Slip Gaji belum digenerate untuk periode ${bulan}/${tahun}.`);
+                continue;
+            }
+
+            const oldDetails = slip.detailKomponen.map(d => ({
+                nama: d.nama,
+                jenis: d.jenis,
+                kategori: d.kategori,
+                jumlah: d.jumlah
+            }));
+
+            // Filter out komponen dengan nama yang sama (replace, bukan akumulasi)
+            const otherDetails = oldDetails.filter(d => d.nama.trim().toLowerCase() !== namaKomponenLower);
+
+            // Tambahkan sebagai komponen baru dengan nama dinamis dari user
+            otherDetails.push({
+                nama: namaKomponen.trim(),
+                jenis: 'TUNJANGAN',
+                kategori: 'LAINNYA',
+                jumlah: honorAmount
+            });
+
+            const gajiKotor = otherDetails
+                .filter(d => d.jenis === 'TUNJANGAN')
+                .reduce((sum, d) => sum + d.jumlah, 0);
+
+            const totalPotongan = otherDetails
+                .filter(d => d.jenis === 'POTONGAN')
+                .reduce((sum, d) => sum + d.jumlah, 0);
+
+            const gajiBersih = gajiKotor - totalPotongan;
+
+            updateDataArray.push({
+                slipId: slip.id,
+                gajiKotor,
+                totalPotongan,
+                gajiBersih,
+                newDetails: otherDetails
+            });
+        }
+
+        let successCount = 0;
+        if (updateDataArray.length > 0) {
+            await prisma.$transaction(async (tx) => {
+                const CHUNK_SIZE = 50;
+                for (let i = 0; i < updateDataArray.length; i += CHUNK_SIZE) {
+                    const chunk = updateDataArray.slice(i, i + CHUNK_SIZE);
+                    await Promise.all(chunk.map(async (updateItem) => {
+                        const { slipId, gajiKotor, totalPotongan, gajiBersih, newDetails } = updateItem;
+
+                        await tx.detailSlipGaji.deleteMany({ where: { slipGajiId: slipId } });
+
+                        await tx.detailSlipGaji.createMany({
+                            data: newDetails.map(d => ({
+                                slipGajiId: slipId,
+                                nama: d.nama,
+                                jenis: d.jenis,
+                                kategori: d.kategori,
+                                jumlah: d.jumlah
+                            }))
+                        });
+
+                        await tx.slipGaji.update({
+                            where: { id: slipId },
+                            data: { gajiKotor, totalPotongan, gajiBersih }
+                        });
+
+                        successCount++;
+                    }));
+                }
+            }, { maxWait: 5000, timeout: 30000 });
+        }
+
+        return {
+            success: true,
+            totalProcessed: successCount,
+            errors: errors.length > 0 ? errors : undefined
+        };
+    }
 }

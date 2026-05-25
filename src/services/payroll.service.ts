@@ -164,28 +164,52 @@ export class PayrollService {
         });
     }
 
-    static async getAll() {
-        return await prisma.slipGaji.findMany({
-            where: {
-                deletedAt: null
+    static async getAll(params?: {
+        bulan?: number;
+        tahun?: number;
+        page?: number;
+        limit?: number;
+    }) {
+        const page = params?.page ?? 1;
+        const limit = params?.limit ?? 10;
+        const skip = (page - 1) * limit;
+
+        const where: any = { deletedAt: null };
+        if (params?.bulan) where.bulan = params.bulan;
+        if (params?.tahun) where.tahun = params.tahun;
+
+        const [data, total] = await prisma.$transaction([
+            prisma.slipGaji.findMany({
+                where,
+                select: {
+                    id: true,
+                    bulan: true,
+                    tahun: true,
+                    gajiBersih: true,
+                    gajiKotor: true,
+                    totalPotongan: true,
+                    createdAt: true,
+                    karyawan: true,
+                    status: true,
+                    detailKomponen: true,
+                    catatanBanding: true,
+                },
+                orderBy: { createdAt: 'desc' },
+                skip,
+                take: limit,
+            }),
+            prisma.slipGaji.count({ where }),
+        ]);
+
+        return {
+            data,
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
             },
-            select: {
-                id: true,
-                bulan: true,
-                tahun: true,
-                gajiBersih: true,
-                gajiKotor: true,
-                totalPotongan: true,
-                createdAt: true,
-                karyawan: true,
-                status: true,
-                detailKomponen: true,
-                catatanBanding: true,
-            },
-            orderBy: {
-                createdAt: 'asc',
-            },
-        });
+        };
     }
 
     static async getById(id: number) {
